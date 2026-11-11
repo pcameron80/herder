@@ -1,0 +1,44 @@
+name: fork-mac-build
+
+# Fork only, never for upstream: tests HerderKit and builds the ad-hoc signed Mac app from this
+# branch, as the `apple` workflow does on main, and uploads the zip as an artifact.
+
+on:
+  push:
+    branches: [fork-build]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_STRIP: debuginfo
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain and the Mac target
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the bindings, the Mac xcframework and the fake daemon
+        run: apple/scripts/build-ffi.sh aarch64-apple-darwin
+      - name: Install the Metal toolchain (SwiftTerm's renderer needs it)
+        run: xcodebuild -downloadComponent MetalToolchain
+      - name: Test HerderKit against the fake daemon
+        env:
+          HERDER_FAKE_DAEMON: ${{ github.workspace }}/target/debug/examples/fake_daemon
+        run: swift test --disable-index-store --package-path apple/HerderKit
+      - name: Build, ad-hoc sign and zip the macOS app
+        run: |
+          brew install xcodegen
+          apple/scripts/build-mac-release.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: herder-app-macos-arm64
+          path: dist/*
+          if-no-files-found: error
